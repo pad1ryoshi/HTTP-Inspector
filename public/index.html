@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HTTP Inspector</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="images/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <select id="method">
+                <option>GET</option>
+                <option>POST</option>
+                <option>PUT</option>
+                <option>DELETE</option>
+            </select>
+            <input type="text" id="url" placeholder="https://example.com">
+            
+            <div class="headers-section">
+                <h4>Headers:</h4>
+                <div id="headers-container">
+                    <div class="header-row">
+                        <input type="text" placeholder="Name" class="header-name">
+                        <input type="text" placeholder="Value" class="header-value">
+                        <button onclick="this.parentElement.remove()">×</button>
+                    </div>
+                </div>
+                <button onclick="addHeaderRow()">+ Add Header</button>
+            </div>
+
+            <div class="actions">
+                <button onclick="sendRequest()">Send</button>
+                <button onclick="updateHistory()" class="refresh">Update</button>
+                <button onclick="clearHistory()" class="danger">Clear</button>
+            </div>
+        </div>
+
+        <div class="history">
+            <div id="requests"></div>
+        </div>
+    </div>
+
+    <script>
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function addHeaderRow() {
+            const container = document.getElementById('headers-container');
+            const div = document.createElement('div');
+            div.className = 'header-row';
+            div.innerHTML = `
+                <input type="text" placeholder="Name" class="header-name">
+                <input type="text" placeholder="Value" class="header-value">
+                <button onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(div);
+        }
+
+        async function sendRequest() {
+            const method = document.getElementById('method').value;
+            const url = document.getElementById('url').value;
+            
+            const headers = {};
+            document.querySelectorAll('.header-row').forEach(row => {
+                const name = row.querySelector('.header-name').value.trim();
+                const value = row.querySelector('.header-value').value.trim();
+                if (name && value) headers[name] = value;
+            });
+
+            try {
+                const response = await fetch('/track', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        ...headers 
+                    },
+                    body: JSON.stringify({ method, url, headers })
+                });
+                
+                const result = await response.json();
+                if (result.success) await updateHistory();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function updateHistory() {
+            try {
+                const response = await fetch('/history');
+                const history = await response.json();
+                renderHistory(history);
+            } catch (error) {
+                console.error('Error to update:', error);
+            }
+        }
+
+        async function clearHistory() {
+            if (confirm('Are you sure?')) {
+                await fetch('/clear-history', { method: 'POST' });
+                await updateHistory();
+            }
+        }
+
+        function formatBody(response) {
+            try {
+                const decoded = atob(response.body);
+                const rawContent = escapeHtml(decoded);
+                
+                return `<pre class="raw-body">${rawContent}</pre>`;
+                
+            } catch (e) {
+                return `<div class="error">Error to decode response</div>`;
+            }
+        }
+
+        function renderHistory(history) {
+            const container = document.getElementById('requests');
+            container.innerHTML = history.map(req => `
+                <div class="request-card" data-id="${req.id}">
+                    <div class="summary">
+                        <span class="method ${req.method}">${req.method}</span>
+                        <span class="status">${req.response.status}</span>
+                        <span class="type">${req.response.type}</span>
+                        <span class="time">${req.response.time}ms</span>
+                        <span class="url">${req.url}</span>
+                    </div>
+                    
+                    <div class="details">
+                        <div class="tabs">
+                            <button class="tab-btn active" data-tab="response">Response Body</button>
+                            <button class="tab-btn" data-tab="headers">Response Headers</button>
+                            <button class="tab-btn" data-tab="request">Request</button>
+                        </div>
+                        
+                        <div class="tab-content response active">
+                            ${formatBody(req.response)}
+                        </div>
+                        
+                        <div class="tab-content headers">
+                            <pre>${JSON.stringify(req.response.headers, null, 2)}</pre>
+                        </div>
+                        
+                        <div class="tab-content request">
+                            <pre>${JSON.stringify({
+                                method: req.method,
+                                url: req.url,
+                                headers: req.request.headers,
+                                body: req.request.body
+                            }, null, 2)}</pre>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            document.querySelectorAll('.request-card').forEach(card => {
+                const tabs = card.querySelector('.tabs');
+                tabs.addEventListener('click', (e) => {
+                    if (!e.target.classList.contains('tab-btn')) return;
+                    
+                    card.querySelectorAll('.tab-btn, .tab-content').forEach(el => {
+                        el.classList.remove('active');
+                    });
+                    
+                    e.target.classList.add('active');
+                    const tabName = e.target.dataset.tab;
+                    card.querySelector(`.tab-content.${tabName}`).classList.add('active');
+                });
+            });
+        }
+
+        // Carregar histórico inicial
+        updateHistory();
+    </script>
+</body>
+</html>
